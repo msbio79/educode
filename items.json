@@ -1,5 +1,15 @@
 [
   {
+    "title": "시뮬레이션 사이트",
+    "url": "https://educode-chi.vercel.app/",
+    "tags": [
+      "프로그램"
+    ],
+    "thumb": "thumbs/41ff1430fb16808c89aefc29456bf4b8.webp",
+    "thumbKey": "41ff1430-fb16-808c-89ae-fc29456bf4b8",
+    "thumbVersion": "2026-11-21T02:58:00.000Z"
+  },
+  {
     "title": "배경제거 프로그램",
     "url": "https://bg-remover-zeta-nine.vercel.app/",
     "tags": [
