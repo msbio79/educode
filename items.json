@@ -1,15 +1,5 @@
 [
   {
-    "title": "12345",
-    "url": "https://ㅈㅂㄷㅂㅈㄷㅈㅂㄷ",
-    "tags": [
-      "기타"
-    ],
-    "thumb": "thumbs/41ff1430fb1680dc851ef13fa7906fec.webp",
-    "thumbKey": "41ff1430-fb16-80dc-851e-f13fa7906fec",
-    "thumbVersion": "2026-11-21T01:47:00.000Z"
-  },
-  {
     "title": "배경제거 프로그램",
     "url": "https://bg-remover-zeta-nine.vercel.app/",
     "tags": [
