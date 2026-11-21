@@ -1,1 +1,40 @@
+name: Notion 동기화
 
+on:
+  schedule:
+    - cron: "0 * * * *"   # 매시 정각 (GitHub 사정에 따라 몇 분 늦어질 수 있음)
+  workflow_dispatch:       # Actions 탭에서 "Run workflow"로 즉시 실행
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-notion
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 이미지 처리 도구 설치
+        run: pip install --quiet pillow
+
+      - name: Notion에서 목록 가져오기
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ vars.NOTION_DATABASE_ID || '378f1430fb16805f8729d5b2c9980d85' }}
+        run: python3 scripts/sync_notion.py
+
+      - name: 바뀐 내용이 있으면 커밋
+        run: |
+          git add -A items.json thumbs
+          if git diff --cached --quiet; then
+            echo "변경 없음"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Notion 동기화: 시뮬레이션 목록 업데이트"
+          git push
