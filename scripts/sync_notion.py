@@ -17,6 +17,7 @@ import io
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -28,19 +29,67 @@ THUMB_WIDTH = 640
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 
+class NotionError(Exception):
+    def __init__(self, status, code, message):
+        super().__init__(f"{status} {code}: {message}")
+        self.status, self.code, self.message = status, code, message
+
+
 def notion(path, body=None):
+    token = os.environ.get("NOTION_TOKEN", "").strip()
+    if not token:
+        fail("NOTION_TOKEN 시크릿이 비어 있습니다. GitHub 저장소 Settings → Secrets and variables → Actions 에 등록하세요.")
     req = urllib.request.Request(
         API + path,
         data=json.dumps(body).encode() if body is not None else None,
         headers={
-            "Authorization": f"Bearer {os.environ['NOTION_TOKEN']}",
-            "Notion-Version": "2022-06-28",
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": "2025-09-03",
             "Content-Type": "application/json",
         },
         method="POST" if body is not None else "GET",
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            info = json.load(e)
+        except Exception:
+            info = {}
+        raise NotionError(e.code, info.get("code", ""), info.get("message", e.reason)) from None
+
+
+def fail(msg):
+    # ::error:: 형식은 GitHub Actions 화면의 Annotations 에 그대로 표시됩니다.
+    print(f"::error::{msg}")
+    sys.exit(1)
+
+
+def find_data_sources(db_id):
+    """데이터베이스 ID → 데이터 소스 ID 목록. 못 찾으면 연결된 데이터 소스를 검색합니다."""
+    try:
+        db = notion(f"/databases/{db_id}")
+        sources = [s["id"] for s in db.get("data_sources", [])]
+        if sources:
+            return sources
+    except NotionError as e:
+        print(f"데이터베이스 {db_id} 를 직접 열지 못했습니다 ({e}). 연결된 데이터베이스를 검색합니다.")
+
+    found = notion("/search", {"filter": {"property": "object", "value": "data_source"}, "page_size": 100})
+    sources = found.get("results", [])
+    for s in sources:
+        print(f"  - 찾은 데이터베이스: {plain(s.get('title'))} ({s['id']})")
+    if len(sources) == 1:
+        return [sources[0]["id"]]
+    if not sources:
+        fail("Notion 연결이 접근할 수 있는 데이터베이스가 없습니다. Notion 개발자 연결 → 콘텐츠 사용 권한에 '과학 시뮬레이션 도구' 페이지를 추가했는지 확인하세요.")
+    # 여러 개면 URL 속성이 있는 것 중 첫 번째
+    for s in sources:
+        if any(p.get("type") == "url" for p in s.get("properties", {}).values()):
+            print(f"URL 속성이 있는 '{plain(s.get('title'))}' 를 사용합니다. 다르면 NOTION_DATABASE_ID 변수를 설정하세요.")
+            return [s["id"]]
+    fail("데이터베이스가 여러 개라 고를 수 없습니다. 위 목록에서 맞는 ID를 NOTION_DATABASE_ID 변수로 등록하세요.")
 
 
 def plain(rich):
@@ -125,20 +174,24 @@ def to_item(page):
 
 
 def main():
-    db = os.environ["NOTION_DATABASE_ID"].replace("-", "")
-    pages, cursor = [], None
-    while True:
-        body = {
-            "page_size": 100,
-            "sorts": [{"timestamp": "created_time", "direction": "descending"}],
-        }
-        if cursor:
-            body["start_cursor"] = cursor
-        res = notion(f"/databases/{db}/query", body)
-        pages += res["results"]
-        if not res.get("has_more"):
-            break
-        cursor = res["next_cursor"]
+    db = os.environ.get("NOTION_DATABASE_ID", "").replace("-", "").strip()
+    pages = []
+    for ds in find_data_sources(db):
+        cursor = None
+        while True:
+            body = {
+                "page_size": 100,
+                "sorts": [{"timestamp": "created_time", "direction": "descending"}],
+            }
+            if cursor:
+                body["start_cursor"] = cursor
+            res = notion(f"/data_sources/{ds}/query", body)
+            pages += [p for p in res["results"] if p.get("object") == "page"]
+            if not res.get("has_more"):
+                break
+            cursor = res["next_cursor"]
+    pages.sort(key=lambda p: p["created_time"], reverse=True)
+    print(f"Notion에서 {len(pages)}개 페이지를 읽었습니다.")
 
     # 이전 결과: 썸네일 재사용용
     old = {}
@@ -170,7 +223,7 @@ def main():
         items.append(item)
 
     if not items:
-        sys.exit("Notion에서 항목을 하나도 가져오지 못했습니다. items.json 을 그대로 둡니다.")
+        fail("Notion에서 항목을 하나도 가져오지 못했습니다(제목·URL 속성 확인). items.json 을 그대로 둡니다.")
 
     # 더 이상 쓰지 않는 썸네일 정리
     used = {i["thumb"] for i in items if i.get("thumb")}
@@ -183,4 +236,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except NotionError as e:
+        hint = {
+            401: "토큰이 올바르지 않습니다. NOTION_TOKEN 시크릿을 다시 확인하세요.",
+            403: "연결에 '콘텐츠 읽기' 권한이 없습니다.",
+            404: "연결이 이 데이터베이스에 접근할 수 없습니다. 콘텐츠 사용 권한을 확인하세요.",
+        }.get(e.status, "")
+        fail(f"Notion API 오류 {e} {hint}")
