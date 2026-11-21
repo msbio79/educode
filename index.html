@@ -166,8 +166,10 @@ const CATS = {
   "화학":     { color: "--c-chem",  icon: "⚗️" },
   "생명과학": { color: "--c-bio",   icon: "🧬" },
   "지구과학": { color: "--c-earth", icon: "🌏" },
-  "프로그램": { color: "--c-prog",  icon: "🛠️" },
 };
+
+// 위 다섯 과목 중 하나라도 달린 항목만 홈페이지에 보입니다.
+// (Notion에는 그대로 남아 있고, 홈페이지에서만 걸러집니다)
 
 // 항목 목록은 items.json 에 있습니다 (Notion에서 자동 동기화).
 let ITEMS = [];
@@ -183,15 +185,15 @@ function readHash() {
 }
 
 function renderChips() {
-  const counts = { "전체": ITEMS.length };
+  const counts = {};
   const cats = [...Object.keys(CATS), ...new Set(ITEMS.flatMap(i => i.tags).filter(t => !CATS[t]))];
   for (const k of cats) { const n = ITEMS.filter(i => i.tags.includes(k)).length; if (n) counts[k] = n; }
   $("chips").innerHTML = Object.keys(counts).map(k =>
-    `<button class="chip" data-cat="${esc(k)}" aria-pressed="${k === active}">${k === "전체" ? "" : cat(k).icon + " "}${esc(k)}<span class="n">${counts[k]}</span></button>`
+    `<button class="chip" data-cat="${esc(k)}" aria-pressed="${k === active}">${cat(k).icon} ${esc(k)}<span class="n">${counts[k]}</span></button>`
   ).join("");
   $("stats").innerHTML =
     `<span class="stat"><b>${ITEMS.length}</b>개 도구</span>` +
-    Object.keys(counts).filter(k => k !== "전체").map(k => `<span class="stat"><b>${counts[k]}</b>${esc(k)}</span>`).join("");
+    Object.keys(counts).map(k => `<span class="stat"><b>${counts[k]}</b>${esc(k)}</span>`).join("");
 }
 
 function render() {
@@ -202,7 +204,7 @@ function render() {
   );
   $("info").textContent = `${active}${q ? ` · "${$("search").value.trim()}"` : ""} — ${list.length}개`;
   $("grid").innerHTML = list.length ? list.map(i => {
-    const main = (active !== "전체" && i.tags.includes(active)) ? active : i.tags[i.tags.length - 1];
+    const main = (active !== "전체" && i.tags.includes(active)) ? active : (i.tags[i.tags.length - 1] || "");
     const c = cat(main);
     const host = i.url.replace(/^https?:\/\//, "").replace(/\/$/, "");
     return `<a class="card" href="${esc(i.url)}" target="_blank" rel="noopener" style="--cc: var(${c.color})">
@@ -219,7 +221,8 @@ function render() {
 
 $("chips").addEventListener("click", e => {
   const b = e.target.closest(".chip"); if (!b) return;
-  active = b.dataset.cat;
+  // 선택된 카테고리를 다시 누르면 해제되어 전체가 보입니다.
+  active = b.dataset.cat === active ? "전체" : b.dataset.cat;
   history.replaceState(null, "", active === "전체" ? location.pathname : "#" + encodeURIComponent(active));
   render();
 });
@@ -242,7 +245,10 @@ function esc(s) {
 fetch("items.json", { cache: "no-cache" })
   .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
   .then(data => {
-    ITEMS = data.filter(i => /^https?:\/\//.test(i.url));
+    ITEMS = data
+      .filter(i => /^https?:\/\//.test(i.url))
+      .map(i => ({ ...i, tags: i.tags.filter(t => CATS[t]) }))
+      .filter(i => i.tags.length);
     active = readHash();
     renderChips();
     render();
